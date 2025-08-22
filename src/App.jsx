@@ -7,6 +7,13 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON
 );
 
+// === email addresses from env (Netlify) ===
+const EMAILS = {
+  BRYCE:  import.meta.env.VITE_MAIL_TO_BRYCE,
+  JUSTIN: import.meta.env.VITE_MAIL_TO_JUSTIN,
+  COLE:   import.meta.env.VITE_MAIL_TO_COLE,
+};
+
 /** ---------- DATE HELPERS (UTC-safe, string only) ---------- **/
 const ymdToday = () => {
   const d = new Date();
@@ -224,12 +231,37 @@ export default function App() {
     }
   }
 
+  async function notifyAssignmentEmail({ to, title, assignee, work_date }) {
+  if (!to) return; // nothing to send to
+  try {
+    await fetch('/.netlify/functions/notify-assignment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to,
+        subject: `New task assigned: ${title}`,
+        html: `<p><strong>${assignee}</strong> was assigned: ${title} for <b>${work_date || '-'}</b>.</p>`
+      })
+    });
+  } catch (err) {
+    console.error('notify-assignment failed', err);
+  }
+}
+
   async function assignTask(task, who) {
     if (task.assignee === who) return;
     await updateTask(task.id, { assignee: who, priority: 999 });
     await reindexColumn(who);
     await reindexColumn(task.assignee);
     log("assign", { id: task.id, to: who });
+    // after setDb(...) and log("assign", task, { from: oldWho, to: who });
+    const to = EMAILS[who];
+    notifyAssignmentEmail({
+      to,
+      title: task.title,
+      assignee: who,
+      work_date: date, // or task.work_date if you prefer
+    });
   }
 
   async function moveDate(task, newDate) {

@@ -7,11 +7,11 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON
 );
 
-// === email addresses from env (Netlify) ===
+// === email addresses from env (Netlify) === (kept for future use)
 const EMAILS = {
-  BRYCE:  import.meta.env.VITE_MAIL_TO_BRYCE,
+  BRYCE: import.meta.env.VITE_MAIL_TO_BRYCE,
   JUSTIN: import.meta.env.VITE_MAIL_TO_JUSTIN,
-  COLE:   import.meta.env.VITE_MAIL_TO_COLE,
+  COLE: import.meta.env.VITE_MAIL_TO_COLE,
 };
 
 /** ---------- DATE HELPERS (UTC-safe, string only) ---------- **/
@@ -75,9 +75,7 @@ function appliesOnDate(rule, dStr) {
     case "last_of_month":
       return parseInt(dStr.slice(8, 10), 10) === lastDOMForStr(dStr);
     case "day_of_month":
-      return (
-        parseInt(dStr.slice(8, 10), 10) === Number(rule.dayOfMonth || 0)
-      );
+      return parseInt(dStr.slice(8, 10), 10) === Number(rule.dayOfMonth || 0);
     default:
       return false;
   }
@@ -124,10 +122,13 @@ export default function App() {
     };
   }, [date]);
 
-  // load data for selected date + templates
+  // load data for selected date + templates (and then materialize)
   useEffect(() => {
-    fetchTemplates();
-    fetchFor(date).then(() => materialize(date));
+    (async () => {
+      const templates = await fetchTemplates();
+      const dayRows = await fetchFor(date);
+      await materialize(date, templates, dayRows);
+    })();
     // eslint-disable-next-line
   }, [date]);
 
@@ -136,7 +137,9 @@ export default function App() {
       .from("recurring")
       .select("*")
       .order("title", { ascending: true });
-    if (!error) setRecur(data || []);
+    const list = error ? [] : data || [];
+    setRecur(list);
+    return list; // return for materialize
   }
 
   async function fetchFor(dStr) {
@@ -146,8 +149,9 @@ export default function App() {
       .eq("work_date", dStr)
       .order("assignee", { ascending: true })
       .order("priority", { ascending: true, nullsFirst: false });
-    if (!error) setRows(data || []);
-    return !error;
+    const list = error ? [] : data || [];
+    setRows(list);
+    return list; // return for materialize
   }
 
   function log(action, details = {}) {
@@ -155,18 +159,18 @@ export default function App() {
     auditRef.current = [entry, ...auditRef.current].slice(0, 500);
   }
 
-  const getNextPriority = (who) =>
-    rows.filter((t) => t.assignee === who).length + 1;
+  const getNextPriority = (who, list) =>
+    (list || rows).filter((t) => t.assignee === who).length + 1;
 
   // ---------- materialize recurrence (future only) ----------
-  async function materialize(dStr) {
+  async function materialize(dStr, templates, dayRows) {
     // ensure each matching template has a task that day
-    for (const tpl of recur) {
+    for (const tpl of templates) {
       if (tpl.start_from && dStr < tpl.start_from) continue;
       if (tpl.recur_end && dStr > tpl.recur_end) continue;
       if (!appliesOnDate(tpl.recur_rule, dStr)) continue;
 
-      const exists = rows.some(
+      const exists = dayRows.some(
         (t) => t.title === tpl.title && t.assignee === tpl.assignee
       );
       if (!exists) {
@@ -175,7 +179,7 @@ export default function App() {
           assignee: tpl.assignee,
           work_date: dStr,
           due_date: null,
-          priority: getNextPriority(tpl.assignee),
+          priority: getNextPriority(tpl.assignee, dayRows),
           completed: false,
           notes: "",
           recur_template_id: tpl.id,
@@ -231,32 +235,21 @@ export default function App() {
     }
   }
 
-  async function notifyAssignmentEmail({ assignee, title, date }) {
-  try {
-    await fetch('/.netlify/functions/notify-assignment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assignee, title, date }),
-    });
-  } catch (err) {
-    console.error('notify-assignment failed', err);
+  // Emails disabled intentionally (no-op for now)
+  async function notifyAssignmentEmail(/* payload */) {
+    return;
   }
-}
 
-async function assignTask(task, who) {
-  if (task.assignee === who) return;
-  await updateTask(task.id, { assignee: who, priority: 999 });
-  await reindexColumn(who);
-  await reindexColumn(task.assignee);
-  log("assign", { id: task.id, to: who });
+  async function assignTask(task, who) {
+    if (task.assignee === who) return;
+    await updateTask(task.id, { assignee: who, priority: 999 });
+    await reindexColumn(who);
+    await reindexColumn(task.assignee);
+    log("assign", { id: task.id, to: who });
 
-  // fire the email
-  notifyAssignmentEmail({
-    assignee: who,
-    title: task.title,
-    date,              // or task.work_date
-  });
-}
+    // emails disabled
+    // notifyAssignmentEmail({ assignee: who, title: task.title, date });
+  }
 
   async function moveDate(task, newDate) {
     await updateTask(task.id, {
@@ -447,7 +440,7 @@ async function assignTask(task, who) {
               setTypedDate(e.target.value);
             }}
           />
-        <input
+          <input
             className="border rounded-xl px-2 py-1"
             value={typedDate}
             onChange={(e) => setTypedDate(e.target.value)}

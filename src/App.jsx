@@ -231,38 +231,32 @@ export default function App() {
     }
   }
 
-  async function notifyAssignmentEmail({ to, title, assignee, work_date }) {
-  if (!to) return; // nothing to send to
+  async function notifyAssignmentEmail({ assignee, title, date }) {
   try {
     await fetch('/.netlify/functions/notify-assignment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to,
-        subject: `New task assigned: ${title}`,
-        html: `<p><strong>${assignee}</strong> was assigned: ${title} for <b>${work_date || '-'}</b>.</p>`
-      })
+      body: JSON.stringify({ assignee, title, date }),
     });
   } catch (err) {
     console.error('notify-assignment failed', err);
   }
 }
 
-  async function assignTask(task, who) {
-    if (task.assignee === who) return;
-    await updateTask(task.id, { assignee: who, priority: 999 });
-    await reindexColumn(who);
-    await reindexColumn(task.assignee);
-    log("assign", { id: task.id, to: who });
-    // after setDb(...) and log("assign", task, { from: oldWho, to: who });
-    const to = EMAILS[who];
-    notifyAssignmentEmail({
-      to,
-      title: task.title,
-      assignee: who,
-      work_date: date, // or task.work_date if you prefer
-    });
-  }
+async function assignTask(task, who) {
+  if (task.assignee === who) return;
+  await updateTask(task.id, { assignee: who, priority: 999 });
+  await reindexColumn(who);
+  await reindexColumn(task.assignee);
+  log("assign", { id: task.id, to: who });
+
+  // fire the email
+  notifyAssignmentEmail({
+    assignee: who,
+    title: task.title,
+    date,              // or task.work_date
+  });
+}
 
   async function moveDate(task, newDate) {
     await updateTask(task.id, {

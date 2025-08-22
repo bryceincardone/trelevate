@@ -1,59 +1,35 @@
 // netlify/functions/notify-assignment.js
-// Sends an email via Resend when a task is assigned to BRYCE/JUSTIN/COLE.
-
-exports.handler = async (event) => {
+export async function handler(event) {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: 'Method Not Allowed' };
   }
 
   try {
-    const { assignee, title, date } = JSON.parse(event.body || '{}');
-    if (!assignee || !title || !date) {
-      return { statusCode: 400, body: 'Missing assignee/title/date' };
+    const { to, subject, html } = JSON.parse(event.body || '{}');
+    if (!to || !subject || !html) {
+      return { statusCode: 400, body: "Missing 'to', 'subject', or 'html'." };
     }
 
-    // Map assignee -> recipient email via env vars
-    const map = {
-      BRYCE: process.env.MAIL_BRYCE,
-      JUSTIN: process.env.MAIL_JUSTIN,
-      COLE: process.env.MAIL_COLE,
-    };
-    const to = map[assignee];
-    if (!to) {
-      // If UNASSIGNED or unknown, silently succeed
-      return { statusCode: 200, body: 'No recipient for this assignee' };
-    }
-
-    const RESEND_API_KEY = process.env.RESEND_API_KEY;
-    const MAIL_FROM = process.env.MAIL_FROM; // e.g. "Trelevate <no-reply@yourdomain.com>"
-    if (!RESEND_API_KEY || !MAIL_FROM) {
-      return { statusCode: 500, body: 'Missing email config' };
-    }
-
-    const subject = `New task assigned: ${title}`;
-    const text = `Task: ${title}\nAssigned date: ${date}\n`;
+    const apiKey = process.env.RESEND_API_KEY;
+    const from = process.env.MAIL_FROM || 'onboarding@resend.dev';
+    if (!apiKey) return { statusCode: 500, body: 'RESEND_API_KEY not set' };
 
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        from: MAIL_FROM,
-        to: [to],
-        subject,
-        text,
-      }),
+      body: JSON.stringify({ from, to, subject, html })
     });
 
+    const text = await resp.text(); // Resend returns JSON; we passthrough as text
     if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      return { statusCode: 502, body: `Email send failed: ${resp.status} ${errText}` };
+      // Bubble up the exact Resend error text so you can read it in the console/logs
+      return { statusCode: resp.status, body: text };
     }
-
     return { statusCode: 200, body: 'ok' };
-  } catch (e) {
-    return { statusCode: 500, body: `Error: ${e.message}` };
+  } catch (err) {
+    return { statusCode: 500, body: `Server error: ${String(err)}` };
   }
-};
+}

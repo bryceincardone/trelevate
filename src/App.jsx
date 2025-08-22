@@ -514,13 +514,28 @@ export default function App() {
           task={editing}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
-            const t = await updateTask(editing.id, patch);
-            if (t.recurring && t.recur_rule?.type) await saveRecurringTemplate(t);
-            if (!t.recurring && t.recur_template_id)
-              await removeRecurringTemplate(t);
+          // Strip fields that do NOT belong in the tasks table
+          const { recurring, recur_rule, recur_end, ...safePatch } = patch;
+
+          // Save the task itself
+          const t = await updateTask(editing.id, safePatch);
+          if (!t) {
+            console.error("Task update failed");
             setEditing(null);
-            return t;
-          }}
+            return null;
+          }
+
+          // Handle recurrence via the templates table
+          if (recurring && recur_rule?.type) {
+            await saveRecurringTemplate({ ...t, recur_rule, recur_end, recurring: true });
+          } else if (!recurring && t.recur_template_id) {
+            await removeRecurringTemplate(t);
+          }
+
+          setEditing(null);
+          return t;
+        }}
+
           onDelete={async () => {
             await removeTask(editing);
             setEditing(null);
